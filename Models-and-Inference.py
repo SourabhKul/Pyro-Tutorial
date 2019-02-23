@@ -41,6 +41,7 @@ import pyro.distributions as dist
 import pyro.infer
 import pyro.optim
 
+import matplotlib.pyplot as plt 
 
 def weather(p_cloudy):
     """
@@ -80,4 +81,33 @@ def ice_cream_sales():
     return py.sample('sales', dist.Normal(expected_sales,10))
 
 # print (ice_cream_sales())
+
+def scale(guess):
+    """
+    In this stochastic function, we have an initial guess of the weight and we assume
+    the true weight is a gaussian with mean value of the guess and sigma of 1. We then
+    model the noisy scale with a gaussian with mean as the true weight and variance of
+    0.85 and return a sample from that distribution
+    inputs:
+        - guess: initial guess of the weight
+    returns:
+        - measurement: the weight as measured by the noisy scale 
+    """
+    weight = py.sample("weight", dist.Normal(guess,1))
+    return py.sample("measurement", dist.Normal(weight,0.75))
+
+# We can condition the scale function by the observed measurement as follows
+observed_measurement = 9.5
+conditioned_scale = py.condition(scale, data={"measurement":observed_measurement})
+
+# We can now infer over the posterior of the function given the observed measurement
+posterior = py.infer.Importance(conditioned_scale, num_samples=1000)
+
+# We can also infer the marginal distribution over the true weight, given our original guess and the observed measurement
+guess = 8
+marginal = py.infer.EmpiricalMarginal(posterior.run(guess), sites="weight")
+
+plt.hist(np.array(marginal.sample((1000,))))
+plt.title("p(weight|measurement="+str(observed_measurement)+"guess="+str(guess))
+plt.show()
 
