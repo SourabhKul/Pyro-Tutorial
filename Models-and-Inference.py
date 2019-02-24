@@ -43,6 +43,10 @@ import pyro.optim
 
 import matplotlib.pyplot as plt 
 
+"""
+Models in Pyro
+"""
+
 def weather(p_cloudy):
     """
     This is an example of a stochastic function. It predicts the weather given the probability of it being cloudy
@@ -82,6 +86,11 @@ def ice_cream_sales():
 
 # print (ice_cream_sales())
 
+"""
+Inference in Pyro
+"""
+
+
 def scale(guess):
     """
     In this stochastic function, we have an initial guess of the weight and we assume
@@ -107,7 +116,55 @@ posterior = py.infer.Importance(conditioned_scale, num_samples=1000)
 guess = 8
 marginal = py.infer.EmpiricalMarginal(posterior.run(guess), sites="weight")
 
-plt.hist(np.array(marginal.sample((1000,))))
-plt.title("p(weight|measurement="+str(observed_measurement)+"guess="+str(guess))
+# plt.hist(np.array(marginal.sample((1000,))))
+# plt.title("p(weight|measurement="+str(observed_measurement)+"guess="+str(guess))
+# # plt.show()
+
+"""
+Stochastic Variational Inference in Pyro
+
+For SVI, we develop a guide fucnction which has some parameters specified.
+We then optimize these parameters using pytorch's optimization methods
+"""
+
+def parameterized_guide(guess):
+    """
+    This guide assumes a gaussian posterior and defines parameters to be learnt for the same.
+    Note that the sample 'name' is same as the name of the weight variable from the earlier 
+    function. This is because we are optmimizing w.r.t that variable. Also note that it is 
+    an unconstrained variable, i.e., not evidenced upon (we cannot 'know' a weight a priori,
+    as we are trying to measure it in the first place)
+    inputs:
+        - guess: your guess of what the weight could be
+    returns:
+        - a sample of 'weight' from the gaussian distribution parameterized by this function
+    """
+    a = py.param("a", torch.tensor(torch.randn(1)+guess))
+    b = py.param("b", torch.randn(1))
+
+    return py.sample("weight", dist.Normal(a,torch.abs(b)))
+
+# Now we start the optmimization process using a svi wrapper. This is a pyro wrapper for invoking
+# Pytorch's own optmimizer
+
+svi = py.infer.SVI(model=conditioned_scale, guide=parameterized_guide,optim=py.optim.SGD({'lr' : 0.001}),loss=py.infer.Trace_ELBO())
+
+# We now run this optmization for 1000 steps, observe loss and print out the learnt parameters
+losses, a, b = [], [], []
+
+for t in range(1000):
+    losses.append(svi.step(guess))
+    a.append(py.param("a").item())
+    b.append(py.param("b").item())
+
+plt.plot(losses)
+plt.title("ELBO")
+print ("a=",pyro.param('a').item())
+print ("b=",pyro.param('b').item())
 plt.show()
 
+# We can now sample from the parameterized_guide function as a posterior
+
+print (parameterized_guide(8).item())
+
+# Next, we combine Neural Netowrks and Probabilistic Functions in a variational autoencoder
