@@ -167,4 +167,3 @@ plt.show()
 
 print (parameterized_guide(8).item())
 
-# Next, we combine Neural Netowrks and Probabilistic Functions in a variational autoencoder

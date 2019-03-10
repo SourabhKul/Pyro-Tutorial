@@ -67,9 +67,90 @@ ax[1].set(xlabel="Terrain Ruggedness Index",
 
 plt.show()
 
-# Defining a linear model
+# Defining a linear model: the old way
 
 def model(cont_africa, rugged):
+    """
+    Predicts the log GDP of a nation based on wether it is from Africa
+    and on terrain ruggedness.
+    inputs:
+        - cont_africa: boolean for wether nation is from Africa 
+        - rugged: ruggedness index of nation
+    returns:
+        - obs: sample of predicted log GDP of nation 
+    """
     a = py.sample("a", dist.Normal(8.,1000.))
     b_a = py.sample("bA", dist.Normal(0.,1.))
     b_r = py.sample("bR", dist.Normal(0.,1.))
+    b_ar = py.sample("bAR", dist.Normal(0.,1.))
+    sigma = py.sample("sigma", dist.Uniform(0.,10.))
+
+    mu = a + b_a * cont_africa + b_r * rugged + b_ar * cont_africa * rugged
+
+    return py.sample("obs", dist.Normal(mu. sigma))
+
+
+# But we need a uniform way to define models; so we follow the pytorch API to defining a model
+# With that we define a generic regression model, and then instantiate one for our application
+
+class RegressionModel(nn.Module):
+    # generic linear regression model
+    def __init__(self,p):
+        # p = number of features
+        super(RegressionModel, self).__init__()
+        self.linear = nn.Linear(p,1)
+        self.factor = nn.Parameter(torch.tensor(1.))
+    
+    def forward(self, x):
+        return self.linear(x) + (self.factor * x[:,0] * x[:,1]).unsqueeze(1)
+
+# now we instantiate a regression model with 2 features - is_africa, ruggedness
+p = 2
+logGDP_predictor = RegressionModel(p) 
+
+# Now we learn this regression model in a bayesian way
+# First we 'lift' the parameters as random variables using random_module()
+
+loc = torch.zeros(1,1)
+scale = torch.ones(1,1)
+
+# Define a prior (unit normal)
+
+prior = dist.Normal(loc, scale)
+
+# Generate a random version of regression model, which will take samples as parameters
+
+lifted_module = py.random_module("logGDP_predictor",nn,prior)
+
+# Sample a model from prior
+
+sampled_reg_model = lifted_module()
+
+# Define a guide function
+
+def guide(cont_africa, rugged, data):
+    """
+    Mean-field approximiation of the posterior of model parameters
+    """
+    loc_a = py.param("loc_a", torch.tensor(torch.randn(1)+guess))
+    scale_a = py.param("scale_a", torch.randn(1))
+    
+    a = py.sample("a", dist.Normal(loc_a, scale_a))
+
+    loc_b_a = py.param("loc_b_a", torch.tensor(torch.randn(1)+guess))
+    scale_b_a = py.param("scale_b_a", torch.randn(1))
+    
+    b_a = py.sample("b_a", dist.Normal(loc_b_a, scale_b_a))
+
+    loc_b_r = py.param("loc_b_r", torch.tensor(torch.randn(1)+guess))
+    scale_b_r = py.param("scale_b_r", torch.randn(1))
+    
+    b_r = py.sample("b_r", dist.Normal(loc_b_r, scale_b_r))
+
+    loc_b_ar = py.param("loc_b_ar", torch.tensor(torch.randn(1)+guess))
+    scale_b_ar = py.param("scale_b_ar", torch.randn(1))
+    
+    b_ar = py.sample("b_ar", dist.Normal(loc_b_ar, scale_b_ar))
+
+    sigma_dist = dist.Normal(0.,1.)
+    sigma = pyro.sample("sigma", sigma_dist)
