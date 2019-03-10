@@ -32,14 +32,18 @@ import pandas as pd
 import seaborn as sns
 import torch
 import torch.nn as nn
-
+from torch.distributions import constraints
 import pyro as py
 import pyro.distributions as dist
+from pyro.distributions import Normal
+from pyro.distributions.util import broadcast_shape
 import pyro.infer
 import pyro.optim
 import pyro.poutine as poutine
 
 import matplotlib.pyplot as plt 
+
+pyro.enable_validation(True)
 
 # Getting dataset for this problem
 DATA_URL = "https://d2fefpcigoriu7.cloudfront.net/datasets/rugged_data.csv"
@@ -65,16 +69,16 @@ ax[1].set(xlabel="Terrain Ruggedness Index",
           ylabel="log GDP (2000)",
           title="African Nations")
 
-plt.show()
+# plt.show()
 
 # Defining a linear model: the old way
 
 def model(cont_africa, rugged):
     """
-    Predicts the log GDP of a nation based on wether it is from Africa
+    Predicts the log GDP of a nation based on whether it is from Africa
     and on terrain ruggedness.
     inputs:
-        - cont_africa: boolean for wether nation is from Africa 
+        - cont_africa: Boolean for whether nation is from Africa 
         - rugged: ruggedness index of nation
     returns:
         - obs: sample of predicted log GDP of nation 
@@ -108,7 +112,7 @@ class RegressionModel(nn.Module):
 p = 2
 logGDP_predictor = RegressionModel(p) 
 
-# Now we learn this regression model in a bayesian way
+# Now we learn this regression model in a Bayesian way
 # First we 'lift' the parameters as random variables using random_module()
 
 loc = torch.zeros(1,1)
@@ -120,17 +124,37 @@ prior = dist.Normal(loc, scale)
 
 # Generate a random version of regression model, which will take samples as parameters
 
-lifted_module = py.random_module("logGDP_predictor",nn,prior)
+# lifted_module = py.random_module("logGDP_predictor",nn,prior)
 
 # Sample a model from prior
 
-sampled_reg_model = lifted_module()
+# sampled_reg_model = lifted_module()
+
+# Now we create a model 
+
+def model(x_data, y_data):
+    w_prior = Normal(torch.zeros(1,2), torch.ones(1,2)).to_event(1)
+    b_prior = dist.Normal(torch.tensor([8.]), torch.tensor([[1000.]])).to_event(1)
+    f_prior = dist.Normal(0.,1.)
+    priors = {'linear.weight':w_prior, 'linear.bias': b_prior, 'factor': f_prior}
+    scale = py.sample("sigma", dist.Uniform(0.,10.))
+
+    lifted_module = py.random_module("module", logGDP_predictor, priors)
+
+    lifted_reg_model = lifted_module()
+
+    with py.plate("map", len(x_data)):
+        prediction_mean = lifted_reg_model(x_data).squeeze(-1)
+
+        py.sample("obs", dist.Normal(prediction_mean, scale), obs=y_data)
+        return prediction_mean
+
 
 # Define a guide function
 
 def guide(cont_africa, rugged, data):
     """
-    Mean-field approximiation of the posterior of model parameters
+    Mean-field approximation of the posterior of model parameters
     """
     loc_a = py.param("loc_a", torch.tensor(torch.randn(1)+guess))
     scale_a = py.param("scale_a", torch.randn(1))
@@ -154,3 +178,25 @@ def guide(cont_africa, rugged, data):
 
     sigma_dist = dist.Normal(0.,1.)
     sigma = pyro.sample("sigma", sigma_dist)
+
+# an easier way is to call the autoguide library, AutoDiagonalNormal is the mean-field approximation
+
+from pyro.contrib.autoguide import AutoDiagonalNormal
+guide = AutoDiagonalNormal(model)
+
+# now we learn the parameters through SVI
+num_iterations = 1000
+optim = pyro.optim.Adam({"lr" : 0.03})
+svi = py.infer.SVI(model, guide, optim, loss=py.infer.Trace_ELBO(), num_samples = 1000)
+
+data = torch.tensor(df.values, dtype=torch.float)
+x_data, y_data = data[:, :-1], data[:, -1]
+
+def train():
+    py.clear_param_store()
+    for j in range(num_iterations):
+        loss = svi.step(x_data,y_data)
+        if j % 100 == 0:
+            print ("Iteration %04d loss: %4f" % (j+1,loss/len(data)))
+
+train()
