@@ -200,4 +200,3 @@ def train():
             print ("Iteration %04d loss: %4f" % (j+1,loss/len(data)))
 
 train()
-# TODO: Fix the '.to_event()' error

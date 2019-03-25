@@ -1,6 +1,12 @@
 """
 Deep Probabilistic Programming 101: Variational Autoencoder (VAE)
 
+by Sourabh Kulkarni (https://www.github.com/SourabhKul)
+
+Following instructions from MLTrain@UAI 2018 Pyro Workshop (http://pyro.ai/examples/bayesian_regression.html)
+
+Some basics before we get started:
+
 Problem: Given a dataset, produce more examples from that dataset
 Easiest Solution: map input data space to a latent output space through a neural network
                   use the learnt latent space and neural network to generate data
